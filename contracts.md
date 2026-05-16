@@ -17,7 +17,6 @@ agent/
   fixer.py           # suggests fixes (Person B)
   context_bank.py    # reads/writes JSON (Person A)
   watsonx_client.py  # wrapper around watsonx.ai (Person B)
-
 .agent-context.json  # the persistent context bank (auto-created)
 sample-repo/         # the codebase under test (Person C)
 ```
