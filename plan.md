@@ -1,0 +1,230 @@
+# loopr
+
+# Hackathon Plan — Recursive Testing Agent
+
+**Team:** 3 people
+**Time budget:** under 20 hours
+**Stack:** Python
+**Workflow:** AI-assisted coding (Cursor, Claude Code, Copilot, or similar)
+**PoC goal:** prove that an agent combining watsonx.ai with a persistent context bank generates better tests on the second run than on the first.
+
+---
+
+## How to use this plan with an AI editor
+
+Every sprint task below is written so you can paste it directly into your AI editor as a prompt. Keep these rules to get good output fast:
+
+- **Give it the contracts first.** Before any task, paste the "Shared contracts" section into the AI editor's context (or pin it as a system prompt / project context file). Without contracts, modules drift and don't integrate.
+- **One module per prompt.** Don't ask the AI to build the whole agent in one shot. Ask for `generator.py` alone, then `runner.py` alone.
+- **Always ask for the test alongside the code.** Even for a PoC, a small test catches integration bugs before they reach merge.
+- **When stuck, paste the error verbatim.** Don't paraphrase. The AI debugs better with the raw traceback.
+- **Reject answers over ~100 lines.** If the AI gives you a giant blob, ask it to split. Big blobs hide bugs.
+
+---
+
+## Hour 0 — Kickoff together (~45 min)
+
+Do this as a group before splitting up. Skipping this step is the single biggest reason hackathons fail.
+
+1. **Clone a starter repo** with the structure below already laid out (empty files are fine).
+2. **Agree on the shared contracts** (next section) — paste them into a `CONTRACTS.md` at the repo root so every AI session can read them.
+3. **Pick the sample repo to test against.** Suggestion: a tiny Python calculator with 3-5 seeded bugs (off-by-one, wrong operator, missing edge case). Keep it under 50 lines total.
+4. **Share watsonx.ai credentials** via `.env` (gitignored). Test that one person can hit the API.
+5. **Create branches:** `main`, `person-a`, `person-b`, `person-c`. Merge to main every 2-3 hours.
+
+---
+
+## Shared contracts (paste into AI editor context)
+
+### Project structure
+
+```
+agent/
+  cli.py             # entry point
+  loop.py            # orchestrates the iteration
+  generator.py       # generates tests
+  runner.py          # runs tests
+  fixer.py           # suggests fixes
+  context_bank.py    # reads/writes JSON
+  watsonx_client.py  # wrapper around watsonx.ai
+.agent-context.json  # the context bank
+sample-repo/         # codebase under test
+```
+
+### Context bank schema
+
+```json
+{
+  "requirements": [],
+  "architecture_notes": [],
+  "bug_fix_history": [
+    {"iteration": 1, "bug": "...", "fix": "...", "file": "..."}
+  ]
+}
+```
+
+### Module interfaces
+
+```python
+# generator.py
+def generate_tests(code: str, context: dict) -> list[str]:
+    """Returns a list of pytest test functions as source code strings."""
+
+# runner.py
+def run_tests(tests: list[str], target_path: str) -> list[dict]:
+    """Returns list of {"name": str, "passed": bool, "error": str | None}."""
+
+# fixer.py
+def suggest_fix(failures: list[dict], code: str, context: dict) -> dict:
+    """Returns {"file": str, "patch": str, "explanation": str}."""
+
+# context_bank.py
+def load() -> dict: ...
+def save(data: dict) -> None: ...
+def append_history(bug: str, fix: str, file: str, iteration: int) -> None: ...
+```
+
+---
+
+## Role split
+
+| Person | Domain | Modules |
+|---|---|---|
+| **A — Loop & CLI** | Orchestration and UX | `cli.py`, `loop.py`, `context_bank.py` |
+| **B — Intelligence** | Anything that talks to watsonx | `watsonx_client.py`, `generator.py`, `fixer.py` |
+| **C — Execution & demo** | Test running, sample repo, presentation | `runner.py`, `sample-repo/`, README, demo |
+
+---
+
+## Sprint 1 — Hours 1-5: build in isolation with mocks
+
+**Goal:** each person has their module working alone, without depending on the others.
+
+### Person A — prompt for AI editor
+
+> Build `cli.py`, `loop.py`, and `context_bank.py` based on the contracts in `CONTRACTS.md`.
+>
+> - `cli.py` uses argparse, accepts a path to a target repo, calls `loop.run(path)`.
+> - `loop.py` exposes `run(path)` that calls generator → runner → fixer **once** (no while loop yet). Use mock functions returning hardcoded data — do not import the real modules yet.
+> - `context_bank.py` reads/writes `.agent-context.json`. If the file doesn't exist, create it with the empty schema.
+> - Add a `pytest` test for `context_bank` that saves and loads a sample dict.
+
+### Person B — prompt for AI editor
+
+> Build `watsonx_client.py` and `generator.py` based on the contracts in `CONTRACTS.md`.
+>
+> - `watsonx_client.py` reads credentials from `.env`, exposes `complete(prompt: str) -> str`.
+> - `generator.py` implements `generate_tests(code, context)`. Build a prompt that asks watsonx for 3-5 pytest functions covering the given code. Parse the response and return a list of strings (one test function each).
+> - Include a hardcoded sample function in `__main__` so I can run `python generator.py` and see real tests printed.
+
+### Person C — prompt for AI editor
+
+> Build `runner.py` based on the contracts in `CONTRACTS.md`.
+>
+> - `run_tests(tests, target_path)` writes each test string to a temp file in `target_path/tests/`, runs `pytest --json-report`, and parses the result into the contract format.
+> - Also create `sample-repo/calculator.py` with 5 simple functions (add, subtract, multiply, divide, power) and **seed 3 bugs** (e.g., subtract returns a+b, divide doesn't handle zero, power uses *).
+> - Add a `__main__` block that runs the module against a hardcoded test string so I can verify it works alone.
+
+### Sprint 1 checkpoint (hour 5)
+Each person runs `python <their_module>.py` and shows it working with fake inputs. **Merge to `main`.**
+
+---
+
+## Sprint 2 — Hours 5-11: end-to-end integration (single iteration)
+
+**Goal:** one full pass works end-to-end. No loop yet.
+
+### Person A — prompt
+
+> In `loop.py`, replace the mocks with real imports of `generator`, `runner`, `fixer`, and `context_bank`. Still **only one iteration** — no while loop. Read the target file, pass it to generator, then runner, then fixer. At the end, print the suggested fix to the console. Add basic error handling so if watsonx returns garbage, we get a clear message instead of a crash.
+
+### Person B — prompt
+
+> Build `fixer.py` based on the contract. The prompt to watsonx should include: the failing test, the original code, and the `bug_fix_history` from context. Return the parsed `{file, patch, explanation}` dict.
+>
+> Also update `generator.py` so its prompt includes any existing `bug_fix_history` from the context dict it receives — so the model knows what bugs have been found before.
+
+### Person C — prompt
+
+> Run `python -m agent.cli ./sample-repo` end-to-end. For each failure, capture the output and share it in our team chat. If a module crashes, file an issue assigned to whoever owns it. Start drafting the README with the install + run commands.
+
+### Sprint 2 checkpoint (hour 11)
+Running `python -m agent.cli ./sample-repo` shows: generated tests → execution results → one suggested fix. Quality doesn't matter yet. **Merge to `main`.**
+
+---
+
+## Sprint 3 — Hours 11-16: the loop and the memory
+
+This is the differentiating piece. Without this, you have a one-shot test generator like a hundred others.
+
+### Person A — prompt
+
+> Convert `loop.run()` into an actual loop: `while not all_passing and iterations < 3`. At the end of each iteration, call `context_bank.append_history()` with the bug found and fix applied. Print a summary at the end: how many iterations, how many tests passed, what was learned.
+
+### Person B — prompt
+
+> Verify that both `generate_tests` and `suggest_fix` prompts explicitly include `context["bug_fix_history"]` and instruct watsonx to **avoid repeating past mistakes**. Tune the prompts so the second iteration produces visibly different tests/fixes than the first.
+
+### Person C — prompt
+
+> Run the CLI twice in a row against the same sample repo, without deleting `.agent-context.json` between runs. Capture both outputs. Confirm:
+> - The context bank grows between runs.
+> - The second run generates different tests or finds fewer bugs.
+>
+> If the second run looks identical to the first, the memory isn't being used — flag this loudly to Person B.
+
+### Sprint 3 checkpoint (hour 16)
+Working demo with loop + persistent memory. **This is the minimum viable PoC.** If you stop here, you have something to show.
+
+---
+
+## Sprint 4 — Hours 16-19: polish and demo prep
+
+Only do this if Sprint 3 finished clean. Otherwise, jump to "Demo script" below.
+
+### Person A — prompt
+
+> Add `rich` for pretty CLI output: colored status per iteration, a table summarizing tests passed/failed, a final summary panel. Wrap any unhandled exceptions in a user-friendly error.
+
+### Person B — prompt
+
+> Iterate twice on the prompts to improve test quality. Specifically: add instructions for **black-box tests** (from requirements only) and **white-box tests** (looking at the code structure). Make sure the model labels which type each test is.
+
+### Person C — prompt
+
+> Write the final README: project description, architecture diagram link, install steps, run command, what to look for in the demo. Take screenshots of `.agent-context.json` before and after a run. If you used IBM Bob to build any of this, export the session reports — they're evidence for the submission.
+
+---
+
+## Hour 19-20 — Demo script
+
+Rehearse this exact flow once before presenting:
+
+1. Show the empty `.agent-context.json`.
+2. Show `sample-repo/calculator.py` with the seeded bugs highlighted.
+3. Run `python -m agent.cli ./sample-repo`. Walk through what's happening on screen.
+4. Show the updated `.agent-context.json` — point at the `bug_fix_history` entries.
+5. Run it a second time. Show that the new tests are different because the agent remembered.
+6. Close with the architecture diagram and the 3 key points: recursive loop, persistent context, watsonx.ai-powered.
+
+---
+
+## Survival rules for a 3-person sprint
+
+- **Stand-up every 2 hours, max 10 minutes.** Only: what I did, what's blocking, what's next.
+- **Stuck more than 30 minutes? Ask for help.** No "almost there".
+- **Mocks beat waiting.** If B is slow on watsonx, A and C use hardcoded responses.
+- **Single `main` branch after Sprint 1**, short branches, frequent merges. Hour-19 merge conflicts are fatal.
+- **Sprint 4 is optional.** A simple, honest PoC beats an ambitious half-finished one.
+
+---
+
+## Definition of Done
+
+The PoC is ready if you can show, live:
+
+1. **Run 1** on the sample repo: generates tests, finds bugs, suggests fixes, writes to the context bank.
+2. **Run 2** on the same sample repo: generated tests are different/better because watsonx read the history.
+3. `.agent-context.json` visible before and after, showing the persisted learning.
+
+If all three boxes check, you have a PoC.
