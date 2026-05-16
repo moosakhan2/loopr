@@ -1,0 +1,16 @@
+{
+  "requirements": [
+    "Function must handle edge cases"
+  ],
+  "architecture_notes": [
+    "Using pytest for testing"
+  ],
+  "bug_fix_history": [
+    {
+      "iteration": 1,
+      "bug": "Division by zero not handled",
+      "fix": "Added zero check before division",
+      "file": "calculator.py"
+    }
+  ]
+}
