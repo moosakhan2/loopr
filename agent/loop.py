@@ -2,74 +2,53 @@
 Loop controller module - orchestrates the recursive testing loop.
 
 This module coordinates the flow: generator → runner → fixer.
-For Sprint 1, uses mock functions. Real implementations will be integrated in Sprint 2.
+Integrates real implementations with error handling.
 """
 
-from typing import Any
-from agent.context_bank import load, save
+import os
+from pathlib import Path
+from typing import Any, Dict, List
+
+from agent.context_bank import load, save, append_history
+from agent.generator import generate_tests
+from agent.runner import run_tests
+from agent.fixer import suggest_fix
 
 
-def _mock_generate_tests(code: str, context: dict[str, Any]) -> list[str]:
+def _read_target_code(target_path: str) -> str:
     """
-    Mock test generator for Sprint 1.
+    Read the main Python file from the target directory.
+    For now, reads the first .py file found (excluding __init__.py and test files).
     
     Args:
-        code: Source code to generate tests for
-        context: Context bank data
-        
-    Returns:
-        List of test function strings
-    """
-    return [
-        "def test_addition():\n    assert 2 + 2 == 4",
-        "def test_subtraction():\n    assert 5 - 3 == 2",
-        "def test_multiplication():\n    assert 3 * 4 == 12"
-    ]
-
-
-def _mock_run_tests(tests: list[str], target_path: str) -> list[dict[str, Any]]:
-    """
-    Mock test runner for Sprint 1.
-    
-    Args:
-        tests: List of test function strings
         target_path: Path to the target repository
         
     Returns:
-        List of test results with name, passed, and error fields
+        Source code as a string
     """
-    return [
-        {"name": "test_addition", "passed": True, "error": None},
-        {"name": "test_subtraction", "passed": False, "error": "AssertionError: assert 2 == 3"},
-        {"name": "test_multiplication", "passed": True, "error": None}
-    ]
-
-
-def _mock_suggest_fix(failures: list[dict[str, Any]], code: str, context: dict[str, Any]) -> dict[str, str]:
-    """
-    Mock fix suggester for Sprint 1.
+    target_dir = Path(target_path)
     
-    Args:
-        failures: List of failed test results
-        code: Original source code
-        context: Context bank data
-        
-    Returns:
-        Dictionary with file, patch, and explanation
-    """
-    return {
-        "file": "calculator.py",
-        "patch": "- result = a - b\n+ result = a + b",
-        "explanation": "The subtraction function was using addition operator instead of subtraction"
-    }
+    # Find Python files (excluding __init__.py and test files)
+    py_files = [
+        f for f in target_dir.glob("*.py")
+        if f.name != "__init__.py" and not f.name.startswith("test_")
+    ]
+    
+    if not py_files:
+        raise RuntimeError(f"No Python files found in {target_path}")
+    
+    # Read the first file found
+    target_file = py_files[0]
+    with open(target_file, 'r', encoding='utf-8') as f:
+        return f.read()
 
 
-def run(path: str) -> dict[str, Any]:
+def run(path: str) -> Dict[str, Any]:
     """
     Run one iteration of the testing loop.
     
     This is the main entry point for the loop controller.
-    For Sprint 1, performs a single iteration with mock functions.
+    Performs a single iteration: generate → run → fix.
     
     Args:
         path: Path to the target repository to test
@@ -81,35 +60,95 @@ def run(path: str) -> dict[str, Any]:
     
     # Load context bank
     print("📖 Loading context bank...")
-    context = load()
-    print(f"   Found {len(context['bug_fix_history'])} previous bug fixes")
+    try:
+        context = load()
+        print(f"   Found {len(context['bug_fix_history'])} previous bug fixes")
+    except Exception as e:
+        print(f"   ⚠️  Warning: Could not load context bank: {e}")
+        context = {
+            "requirements": [],
+            "architecture_notes": [],
+            "bug_fix_history": []
+        }
     
-    # Mock: Read code from target path
-    # In real implementation, this would read actual files
-    mock_code = "def subtract(a, b):\n    return a + b  # Bug: should be a - b"
-    print(f"📄 Read code from {path}")
+    # Read code from target path
+    print(f"📄 Reading code from {path}...")
+    try:
+        code = _read_target_code(path)
+        print(f"   Read {len(code)} characters of code")
+    except Exception as e:
+        print(f"   ❌ Error reading code: {e}")
+        return {
+            "path": path,
+            "error": f"Failed to read code: {str(e)}",
+            "tests_generated": 0,
+            "tests_passed": 0,
+            "tests_failed": 0,
+            "fix_suggested": False
+        }
     
     # Step 1: Generate tests
     print("\n📝 Generating tests...")
-    tests = _mock_generate_tests(mock_code, context)
-    print(f"   Generated {len(tests)} tests")
+    try:
+        tests = generate_tests(code, context)
+        print(f"   Generated {len(tests)} tests")
+    except Exception as e:
+        print(f"   ❌ Error generating tests: {e}")
+        print(f"   This usually means watsonx.ai returned unexpected output.")
+        print(f"   Check your .env credentials and try again.")
+        return {
+            "path": path,
+            "error": f"Failed to generate tests: {str(e)}",
+            "tests_generated": 0,
+            "tests_passed": 0,
+            "tests_failed": 0,
+            "fix_suggested": False
+        }
     
     # Step 2: Run tests
     print("\n🧪 Running tests...")
-    results = _mock_run_tests(tests, path)
-    passed = [r for r in results if r["passed"]]
-    failed = [r for r in results if not r["passed"]]
-    print(f"   ✅ {len(passed)} passed")
-    print(f"   ❌ {len(failed)} failed")
+    try:
+        results = run_tests(tests, path)
+        passed = [r for r in results if r["passed"]]
+        failed = [r for r in results if not r["passed"]]
+        print(f"   ✅ {len(passed)} passed")
+        print(f"   ❌ {len(failed)} failed")
+    except Exception as e:
+        print(f"   ❌ Error running tests: {e}")
+        return {
+            "path": path,
+            "error": f"Failed to run tests: {str(e)}",
+            "tests_generated": len(tests),
+            "tests_passed": 0,
+            "tests_failed": 0,
+            "fix_suggested": False
+        }
     
     # Step 3: If there are failures, suggest fixes
     fix_suggestion = None
     if failed:
         print("\n🔧 Analyzing failures and suggesting fixes...")
-        fix_suggestion = _mock_suggest_fix(failed, mock_code, context)
-        print(f"   File: {fix_suggestion['file']}")
-        print(f"   Explanation: {fix_suggestion['explanation']}")
-        print(f"   Patch:\n{fix_suggestion['patch']}")
+        try:
+            fix_suggestion = suggest_fix(failed, code, context)
+            
+            # Display the fix suggestion
+            print("\n" + "=" * 70)
+            print("🔍 FIX SUGGESTION")
+            print("=" * 70)
+            print(f"📁 File: {fix_suggestion['file']}")
+            print(f"💡 Explanation: {fix_suggestion['explanation']}")
+            print(f"\n📝 Patch:")
+            print(fix_suggestion['patch'])
+            print("=" * 70)
+            
+        except Exception as e:
+            print(f"   ⚠️  Warning: Could not generate fix suggestion: {e}")
+            print(f"   This usually means watsonx.ai returned unexpected output.")
+            fix_suggestion = {
+                "file": "unknown",
+                "patch": "",
+                "explanation": f"Error: {str(e)}"
+            }
     else:
         print("\n✅ All tests passed!")
     
