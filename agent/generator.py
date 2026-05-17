@@ -78,13 +78,14 @@ def _build_prompt(code: str, context: dict) -> str:
         "6. If the code has obvious bugs, write tests that would catch them",
         "7. Consider boundary conditions, null/None values, and error cases",
         "",
-        "# OUTPUT FORMAT:",
-        "Return ONLY the test functions, one after another.",
-        "Each function should start with 'def test_' and be properly indented.",
-        "Do not include explanations, markdown formatting, or extra text.",
-        "Just the raw Python test functions.",
+        "# OUTPUT FORMAT RULES - FOLLOW EXACTLY:",
+        "1. Output ONLY Python code. Zero explanation. Zero commentary.",
+        "2. Every function MUST start with 'def test_' on its own line.",
+        "3. Every function name MUST be unique — no duplicate function names.",
+        "4. Do NOT repeat any function you have already written.",
+        "5. Do NOT include any text outside of function definitions.",
+        "6. Do NOT include markdown, comments, or instructions of any kind.",
         "",
-        "# EXAMPLE OUTPUT FORMAT:",
         "def test_basic_functionality():",
         "    result = my_function(5)",
         "    assert result == 10",
@@ -93,7 +94,7 @@ def _build_prompt(code: str, context: dict) -> str:
         "    result = my_function(0)",
         "    assert result == 0",
         "",
-        "Now generate the test functions:"
+        "Now write exactly 4 unique test functions and nothing else:"
     ])
     
     return "\n".join(prompt_parts)
@@ -121,6 +122,7 @@ def _parse_tests(response: str) -> list[str]:
     
     # Clean up each test function
     tests = []
+    seen_names = set()
     for match in matches:
         # Clean up whitespace
         test_func = match.strip()
@@ -143,7 +145,10 @@ def _parse_tests(response: str) -> list[str]:
         
         # Only include if it looks like a valid test function
         if test_func.startswith('def test_') and 'assert' in test_func:
-            tests.append(test_func)
+            func_name = test_func.split('(')[0]
+            if func_name not in seen_names:
+                seen_names.add(func_name)
+                tests.append(test_func)
     
     # If we didn't find any tests, raise an error
     if not tests:

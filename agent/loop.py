@@ -141,6 +141,14 @@ def run(path: str) -> Dict[str, Any]:
             print(fix_suggestion['patch'])
             print("=" * 70)
             
+            # Save fix to context bank
+            append_history(
+                bug=fix_suggestion['explanation'],
+                fix=fix_suggestion['patch'],
+                file=fix_suggestion['file'],
+                iteration=len(context['bug_fix_history']) + 1
+            )
+            
         except Exception as e:
             print(f"   ⚠️  Warning: Could not generate fix suggestion: {e}")
             print(f"   This usually means watsonx.ai returned unexpected output.")

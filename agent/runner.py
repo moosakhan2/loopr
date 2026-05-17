@@ -29,7 +29,8 @@ def run_tests(tests: List[str], target_path: str) -> List[Dict[str, Any]]:
     test_file = tests_dir / "test_generated.py"
     
     # Combine all test strings into a single test file
-    test_content = "\n\n".join(tests)
+    import_header = "import sys\nsys.path.insert(0, '.')\nfrom calculator import *\n\n"
+    test_content = import_header + "\n\n".join(tests)
     
     with open(test_file, "w") as f:
         f.write(test_content)
@@ -91,8 +92,6 @@ def run_tests(tests: List[str], target_path: str) -> List[Dict[str, Any]]:
         }]
     finally:
         # Cleanup
-        if test_file.exists():
-            test_file.unlink()
         if json_report_path.exists():
             json_report_path.unlink()
 
