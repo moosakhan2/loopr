@@ -28,8 +28,21 @@ def run_tests(tests: List[str], target_path: str) -> List[Dict[str, Any]]:
     # Write each test to a temporary file
     test_file = tests_dir / "test_generated.py"
     
+    # Dynamically import all Python modules in the target directory
+    target_dir = Path(target_path)
+    py_files = [
+        f.stem for f in target_dir.glob("*.py")
+        if f.name != "__init__.py"
+        and not f.name.startswith("test_")
+        and f.stem != "conftest"
+    ]
+    import_lines = ["import sys", "sys.path.insert(0, '.')"]
+    for module in py_files:
+        import_lines.append(f"from {module} import *")
+    import_header = "\n".join(import_lines) + "\n\n"
+    
     # Combine all test strings into a single test file
-    test_content = "\n\n".join(tests)
+    test_content = import_header + "\n\n".join(tests)
     
     with open(test_file, "w") as f:
         f.write(test_content)
@@ -91,8 +104,6 @@ def run_tests(tests: List[str], target_path: str) -> List[Dict[str, Any]]:
         }]
     finally:
         # Cleanup
-        if test_file.exists():
-            test_file.unlink()
         if json_report_path.exists():
             json_report_path.unlink()
 
