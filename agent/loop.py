@@ -99,144 +99,182 @@ def _apply_fix(target_path: str, fix_suggestion: dict, original_code: str) -> bo
 
 def run(path: str) -> Dict[str, Any]:
     """
-    Run one iteration of the testing loop.
+    Run the recursive testing loop.
     
     This is the main entry point for the loop controller.
-    Performs a single iteration: generate → run → fix.
+    Performs multiple iterations: generate → run → fix → repeat.
     
     Args:
         path: Path to the target repository to test
         
     Returns:
-        Dictionary with summary of the run
+        Dictionary with summary of all iterations
     """
-    print(f"🔍 Starting loop for repository: {path}")
+    print(f"🔍 Starting recursive loop for repository: {path}")
     
-    # Load context bank
-    print("📖 Loading context bank...")
-    try:
-        context = load()
-        print(f"   Found {len(context['bug_fix_history'])} previous bug fixes")
-    except Exception as e:
-        print(f"   ⚠️  Warning: Could not load context bank: {e}")
-        context = {
-            "requirements": [],
-            "architecture_notes": [],
-            "bug_fix_history": []
-        }
+    iterations = 0
+    max_iterations = 3
+    total_tests_generated = 0
+    total_tests_passed = 0
+    total_tests_failed = 0
+    all_fix_suggestions = []
     
-    # Read code from target path
-    print(f"📄 Reading code from {path}...")
-    try:
-        code = _read_target_code(path)
-        print(f"   Read {len(code)} characters of code")
-    except Exception as e:
-        print(f"   ❌ Error reading code: {e}")
-        return {
-            "path": path,
-            "error": f"Failed to read code: {str(e)}",
-            "tests_generated": 0,
-            "tests_passed": 0,
-            "tests_failed": 0,
-            "fix_suggested": False
-        }
-    
-    # Step 1: Generate tests
-    print("\n📝 Generating tests...")
-    try:
-        tests = generate_tests(code, context)
-        print(f"   Generated {len(tests)} tests")
-    except Exception as e:
-        print(f"   ❌ Error generating tests: {e}")
-        print(f"   This usually means watsonx.ai returned unexpected output.")
-        print(f"   Check your .env credentials and try again.")
-        return {
-            "path": path,
-            "error": f"Failed to generate tests: {str(e)}",
-            "tests_generated": 0,
-            "tests_passed": 0,
-            "tests_failed": 0,
-            "fix_suggested": False
-        }
-    
-    # Step 2: Run tests
-    print("\n🧪 Running tests...")
-    try:
-        results = run_tests(tests, path)
-        passed = [r for r in results if r["passed"]]
-        failed = [r for r in results if not r["passed"]]
-        print(f"   ✅ {len(passed)} passed")
-        print(f"   ❌ {len(failed)} failed")
-    except Exception as e:
-        print(f"   ❌ Error running tests: {e}")
-        return {
-            "path": path,
-            "error": f"Failed to run tests: {str(e)}",
-            "tests_generated": len(tests),
-            "tests_passed": 0,
-            "tests_failed": 0,
-            "fix_suggested": False
-        }
-    
-    # Step 3: If there are failures, suggest fixes
-    fix_suggestion = None
-    if failed:
-        print("\n🔧 Analyzing failures and suggesting fixes...")
+    while iterations < max_iterations:
+        iteration_num = iterations + 1
+        print(f"\n{'=' * 70}")
+        print(f"🔄 ITERATION {iteration_num}/{max_iterations}")
+        print(f"{'=' * 70}")
+        
+        # Load/reload context bank
+        print("📖 Loading context bank...")
         try:
-            fix_suggestion = suggest_fix(failed, code, context)
-            
-            # Display the fix suggestion
-            print("\n" + "=" * 70)
-            print("🔍 FIX SUGGESTION")
-            print("=" * 70)
-            print(f"📁 File: {fix_suggestion['file']}")
-            print(f"💡 Explanation: {fix_suggestion['explanation']}")
-            print(f"\n📝 Patch:")
-            print(fix_suggestion['patch'])
-            print("=" * 70)
-            
-            # Save fix to context bank
-            append_history(
-                bug=fix_suggestion['explanation'],
-                fix=fix_suggestion['patch'],
-                file=fix_suggestion['file'],
-                iteration=len(context['bug_fix_history']) + 1
-            )
-            
-            # Show diff and ask for approval
-            print("\n🔨 Reviewing fix...")
-            _apply_fix(path, fix_suggestion, code)
-            
+            context = load()
+            print(f"   Found {len(context['bug_fix_history'])} previous bug fixes")
         except Exception as e:
-            print(f"   ⚠️  Warning: Could not generate fix suggestion: {e}")
-            print(f"   This usually means watsonx.ai returned unexpected output.")
-            fix_suggestion = {
-                "file": "unknown",
-                "patch": "",
-                "explanation": f"Error: {str(e)}"
+            print(f"   ⚠️  Warning: Could not load context bank: {e}")
+            context = {
+                "requirements": [],
+                "architecture_notes": [],
+                "bug_fix_history": []
             }
-    else:
-        print("\n✅ All tests passed!")
+        
+        # Read/reload code from target path
+        print(f"📄 Reading code from {path}...")
+        try:
+            code = _read_target_code(path)
+            print(f"   Read {len(code)} characters of code")
+        except Exception as e:
+            print(f"   ❌ Error reading code: {e}")
+            return {
+                "path": path,
+                "error": f"Failed to read code: {str(e)}",
+                "iterations": iterations,
+                "tests_generated": total_tests_generated,
+                "tests_passed": total_tests_passed,
+                "tests_failed": total_tests_failed,
+                "fix_suggested": False
+            }
+        
+        # Step 1: Generate tests
+        print("\n📝 Generating tests...")
+        try:
+            tests = generate_tests(code, context)
+            print(f"   Generated {len(tests)} tests")
+            total_tests_generated += len(tests)
+        except Exception as e:
+            print(f"   ❌ Error generating tests: {e}")
+            print(f"   This usually means watsonx.ai returned unexpected output.")
+            print(f"   Check your .env credentials and try again.")
+            return {
+                "path": path,
+                "error": f"Failed to generate tests: {str(e)}",
+                "iterations": iterations,
+                "tests_generated": total_tests_generated,
+                "tests_passed": total_tests_passed,
+                "tests_failed": total_tests_failed,
+                "fix_suggested": False
+            }
+        
+        # Step 2: Run tests
+        print("\n🧪 Running tests...")
+        try:
+            results = run_tests(tests, path)
+            passed = [r for r in results if r["passed"]]
+            failed = [r for r in results if not r["passed"]]
+            print(f"   ✅ {len(passed)} passed")
+            print(f"   ❌ {len(failed)} failed")
+            total_tests_passed += len(passed)
+            total_tests_failed += len(failed)
+        except Exception as e:
+            print(f"   ❌ Error running tests: {e}")
+            return {
+                "path": path,
+                "error": f"Failed to run tests: {str(e)}",
+                "iterations": iterations,
+                "tests_generated": total_tests_generated,
+                "tests_passed": total_tests_passed,
+                "tests_failed": total_tests_failed,
+                "fix_suggested": False
+            }
+        
+        # Step 3: If there are failures, suggest fixes
+        fix_suggestion = None
+        if failed:
+            print("\n🔧 Analyzing failures and suggesting fixes...")
+            try:
+                fix_suggestion = suggest_fix(failed, code, context)
+                
+                # Display the fix suggestion
+                print("\n" + "=" * 70)
+                print("🔍 FIX SUGGESTION")
+                print("=" * 70)
+                print(f"📁 File: {fix_suggestion['file']}")
+                print(f"💡 Explanation: {fix_suggestion['explanation']}")
+                print(f"\n📝 Patch:")
+                print(fix_suggestion['patch'])
+                print("=" * 70)
+                
+                # Save fix to context bank
+                append_history(
+                    bug=fix_suggestion['explanation'],
+                    fix=fix_suggestion['patch'],
+                    file=fix_suggestion['file'],
+                    iteration=len(context['bug_fix_history']) + 1
+                )
+                
+                # Show diff and ask for approval
+                print("\n🔨 Reviewing fix...")
+                _apply_fix(path, fix_suggestion, code)
+                
+                all_fix_suggestions.append(fix_suggestion)
+                
+            except Exception as e:
+                print(f"   ⚠️  Warning: Could not generate fix suggestion: {e}")
+                print(f"   This usually means watsonx.ai returned unexpected output.")
+                fix_suggestion = {
+                    "file": "unknown",
+                    "patch": "",
+                    "explanation": f"Error: {str(e)}"
+                }
+        else:
+            print("\n✅ All tests passed!")
+        
+        # Increment iteration counter
+        iterations += 1
+        
+        # Check if we should continue
+        if len(failed) == 0:
+            # All tests passed, no need to continue
+            print("\n🎉 All tests passing! Exiting loop.")
+            break
+        elif iterations < max_iterations:
+            # Ask user if they want to continue
+            answer = input("\n🔄 Run another iteration? (y/n): ").strip().lower()
+            if answer != 'y':
+                print("   ⏭️  Loop stopped by user.")
+                break
     
-    # Prepare summary
+    # Final summary
+    print("\n" + "=" * 70)
+    print("🏁 FINAL SUMMARY")
+    print("=" * 70)
+    print(f"   Repository: {path}")
+    print(f"   Total iterations: {iterations}")
+    print(f"   Total tests generated: {total_tests_generated}")
+    print(f"   Total tests passed: {total_tests_passed}")
+    print(f"   Total tests failed: {total_tests_failed}")
+    print(f"   Fixes suggested: {len(all_fix_suggestions)}")
+    print("=" * 70)
+    
     summary = {
         "path": path,
-        "tests_generated": len(tests),
-        "tests_passed": len(passed),
-        "tests_failed": len(failed),
-        "fix_suggested": fix_suggestion is not None,
-        "fix_details": fix_suggestion
+        "iterations": iterations,
+        "tests_generated": total_tests_generated,
+        "tests_passed": total_tests_passed,
+        "tests_failed": total_tests_failed,
+        "fix_suggested": len(all_fix_suggestions) > 0,
+        "all_fixes": all_fix_suggestions
     }
-    
-    print("\n" + "=" * 60)
-    print("📊 Summary:")
-    print(f"   Repository: {summary['path']}")
-    print(f"   Tests generated: {summary['tests_generated']}")
-    print(f"   Tests passed: {summary['tests_passed']}")
-    print(f"   Tests failed: {summary['tests_failed']}")
-    if summary['fix_suggested']:
-        print(f"   Fix suggested: Yes")
-    print("=" * 60)
     
     return summary
 
