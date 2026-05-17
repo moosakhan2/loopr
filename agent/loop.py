@@ -6,6 +6,7 @@ Integrates real implementations with error handling.
 """
 
 import os
+import re
 import difflib
 from pathlib import Path
 from typing import Any, Dict, List
@@ -57,6 +58,15 @@ def _apply_fix(target_path: str, fix_suggestion: dict, original_code: str | None
         
         if not file_name or not patch:
             return False
+        
+        # Strip file headers from patch if present
+        # Remove lines like "# ===== FILE: something.py ====="
+        clean_lines = []
+        for line in patch.splitlines():
+            if re.match(r'^#\s*={3,}\s*FILE:.*={3,}\s*$', line.strip()):
+                continue
+            clean_lines.append(line)
+        patch = '\n'.join(clean_lines).strip()
         
         # Find the target file
         target_file = target_dir / file_name
