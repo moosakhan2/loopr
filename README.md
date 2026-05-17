@@ -1,284 +1,161 @@
-# 🔁 Loopr - Recursive Testing Agent
+# Loopr 🔁
 
-An AI-powered testing framework that uses watsonx.ai to automatically generate, run, and fix tests for your Python code. Loopr iteratively finds bugs, suggests fixes, and loops until your codebase is clean.
+> A recursive AI-powered testing agent that finds bugs, suggests fixes, applies them, and loops until your codebase is clean.
 
-## 🚀 Quick Start
+Built with **IBM Bob**. Powered by **IBM watsonx.ai**.
 
-### Installation
+---
 
-1. **Clone the repository:**
+## The Problem
+
+Writing tests is slow. Fixing bugs is slower. And doing both repeatedly until everything passes? Nobody has time for that.
+
+Existing tools generate tests once and stop. They don't fix failures. They don't learn from your codebase. They don't remember what they already tried.
+
+**Loopr does.**
+
+---
+
+## How It Works
+
+Loopr enters a recursive loop:
+
+1. **Reads** all Python files in your target repository
+2. **Generates** pytest test functions using IBM watsonx.ai (Granite model)
+3. **Runs** the tests and collects pass/fail results
+4. **Suggests** targeted fixes for failing tests — one fix per file
+5. **Shows** a colored diff of proposed changes and asks for your approval
+6. **Applies** the fix to the actual file if approved
+7. **Repeats** until all tests pass or max iterations reached
+
+Every bug found and every fix applied is stored in a local **context bank** (`.agent-context.json`) — so Loopr never repeats the same mistake and gets smarter about your codebase over time.
+
+---
+
+## Demo
+
+```
+🔄 ITERATION 1/3
+📝 Generating tests...    Generated 4 tests
+🧪 Running tests...       ✅ 3 passed  ❌ 1 failed
+
+🔍 FIX SUGGESTION 1/2
+📁 File: calculator.py
+💡 subtract() was returning a+b instead of a-b
+
+📋 Proposed changes:
+--- original/calculator.py
++++ fixed/calculator.py
+-    return a + b  # BUG
++    return a - b  # FIX
+
+❓ Apply this fix? (y/n/skip): y
+✅ Fix applied to sample-repo/calculator.py
+
+🔄 ITERATION 2/3
+🧪 Running tests...       ✅ 6 passed  ❌ 0 failed
+🎉 All tests passing! Exiting loop.
+```
+
+---
+
+## Installation
+
+**Prerequisites:**
+- Python 3.10+
+- IBM watsonx.ai credentials (API key + Project ID)
+
+**Install:**
 ```bash
-git clone <repository-url>
+git clone https://github.com/moosakhan2/loopr
 cd loopr
+python3 -m venv venv
+source venv/bin/activate
+pip install -e .
 ```
 
-2. **Install dependencies:**
-```bash
-pip install -r requirements.txt
+**Configure credentials:**
+
+Create a `.env` file in the root:
 ```
-
-Required packages:
-- `pytest` - Test framework
-- `pytest-json-report` - JSON output for test results
-- `python-dotenv` - Environment variable management
-- `requests` - HTTP client for watsonx.ai API
-
-3. **Configure watsonx.ai credentials:**
-
-Create a `.env` file in the project root (copy from `.env.example`):
-```bash
-cp .env.example .env
-```
-
-Edit `.env` and add your watsonx.ai credentials:
-```env
 WATSONX_API_KEY=your_api_key_here
 WATSONX_PROJECT_ID=your_project_id_here
 WATSONX_URL=https://us-south.ml.cloud.ibm.com
 ```
 
-### Run End-to-End
+---
 
-Run the complete testing loop on your codebase:
+## Usage
 
 ```bash
-python -m agent.cli ./path/to/your/project
+loopr ./path/to/your/repo
 ```
 
-Example with the included sample repository:
+Loopr will automatically:
+- Discover all Python files in the directory
+- Generate tests, run them, suggest and apply fixes
+- Ask before applying any change
+- Remember what it fixed for smarter future runs
+
+**Options** (coming soon):
 ```bash
-python -m agent.cli ./sample-repo
+loopr run --coverage 85    # Target coverage threshold
+loopr run --max-iter 5     # Max iterations (default: 3)
+loopr run --auto-approve   # Apply all fixes without prompting
 ```
-
-**CLI Options:**
-```bash
-python -m agent.cli ./sample-repo --coverage 85 --max-iterations 3 --verbose
-```
-
-- `--coverage` - Target coverage threshold (default: 85)
-- `--max-iterations` - Maximum number of iterations (default: 3)
-- `--dry-run` - Suggest fixes without applying them
-- `--auto-approve` - Apply all fixes without prompting
-- `--verbose` / `-v` - Enable verbose output
-
-## 📖 Usage Examples
-
-### Test Individual Modules
-
-**Test the watsonx.ai client:**
-```bash
-python -m agent.watsonx_client
-```
-
-**Test the test generator:**
-```bash
-python -m agent.generator
-```
-
-**Test the test runner:**
-```bash
-python -m agent.runner
-```
-
-**Test the context bank:**
-```bash
-python -m agent.context_bank
-```
-
-**Test the orchestration loop:**
-```bash
-python -m agent.loop
-```
-
-### Use as a Library
-
-```python
-from agent import generate_tests
-
-# Your code to test
-code = '''
-def add(a, b):
-    return a + b
-'''
-
-# Context (optional)
-context = {
-    "requirements": ["Function should handle integers and floats"],
-    "architecture_notes": [],
-    "bug_fix_history": []
-}
-
-# Generate tests
-tests = generate_tests(code, context)
-
-# Print generated tests
-for i, test in enumerate(tests, 1):
-    print(f"Test {i}:")
-    print(test)
-    print()
-```
-
-## 📁 Project Structure
-
-```
-loopr/
-├── agent/
-│   ├── __init__.py          # Package initialization
-│   ├── cli.py               # CLI entry point ✅
-│   ├── loop.py              # Orchestration loop ✅
-│   ├── generator.py         # Test generation ✅
-│   ├── runner.py            # Test execution ✅
-│   ├── fixer.py             # Fix suggestions (TODO)
-│   ├── context_bank.py      # JSON context storage ✅
-│   └── watsonx_client.py    # watsonx.ai API wrapper ✅
-├── sample-repo/
-│   ├── calculator.py        # Sample code with bugs
-│   └── tests/               # Generated tests go here
-├── .agent-context.json      # Context bank (auto-generated)
-├── .env                     # Your credentials (not in git)
-├── .env.example             # Template for credentials
-├── requirements.txt         # Python dependencies
-└── README.md                # This file
-```
-
-## 🔧 Module Details
-
-### cli.py
-Command-line interface that:
-- Parses arguments (path, coverage, max-iterations, etc.)
-- Validates target path
-- Calls the orchestration loop
-- Handles errors and user interrupts
-
-### loop.py
-Orchestrates the testing cycle:
-- Loads context bank
-- Generates tests using watsonx.ai
-- Runs tests with pytest
-- Suggests fixes for failures
-- Updates context bank with bug history
-
-### generator.py
-Test generation using watsonx.ai:
-- Implements `generate_tests(code: str, context: dict) -> List[str]`
-- Builds prompts with bug history context
-- Parses LLM response into individual test functions
-- Returns list of pytest test function strings
-
-### runner.py
-Test execution engine:
-- Implements `run_tests(tests: List[str], target_path: str) -> List[dict]`
-- Writes tests to temporary files in `target_path/tests/`
-- Runs pytest with `--json-report` flag
-- Parses results into structured format: `{"name": str, "passed": bool, "error": str | None}`
-- Handles timeouts and execution errors
-
-### context_bank.py
-Persistent memory management:
-- Implements `load()`, `save()`, and `append_history()` functions
-- Manages `.agent-context.json` file
-- Stores requirements, architecture notes, and bug fix history
-- Auto-creates file with empty schema if missing
-
-### watsonx_client.py
-watsonx.ai API wrapper:
-- Implements `complete(prompt: str) -> str`
-- Handles IBM Cloud IAM authentication
-- Uses `ibm/granite-3-8b-instruct` model
-- Manages API errors and timeouts
-
-### fixer.py (TODO)
-Fix suggestion engine:
-- Will implement `suggest_fix(failures: List[dict], code: str, context: dict) -> dict`
-- Will analyze test failures and suggest code fixes
-- Will return patch format with explanation
-
-## 🧪 Sample Repository
-
-The `sample-repo/` directory contains a sample calculator module with intentional bugs for testing:
-
-**calculator.py** - 5 functions with 3 bugs:
-1. `subtract(a, b)` - Returns `a + b` instead of `a - b`
-2. `divide(a, b)` - Doesn't handle division by zero
-3. `power(a, b)` - Uses `*` instead of `**`
-
-Run the agent on it:
-```bash
-python -m agent.cli ./sample-repo
-```
-
-## 📊 Context Bank Schema
-
-The `.agent-context.json` file stores:
-
-```json
-{
-  "requirements": [],
-  "architecture_notes": [],
-  "bug_fix_history": [
-    {
-      "iteration": 1,
-      "bug": "Description of the bug",
-      "fix": "Description of the fix",
-      "file": "path/to/file.py"
-    }
-  ]
-}
-```
-
-This context is used to:
-- Inform test generation (avoid past mistakes)
-- Track bug patterns over iterations
-- Improve fix suggestions
-
-## 🐛 Troubleshooting
-
-**"WATSONX_API_KEY not found in .env file"**
-- Make sure you created a `.env` file with your credentials
-- Check that the file is in the project root directory
-
-**"Failed to get IAM token"**
-- Verify your API key is correct
-- Check your internet connection
-- Ensure you have access to IBM Cloud
-
-**"pytest: command not found"**
-- Install pytest: `pip install pytest pytest-json-report`
-
-**Tests not running**
-- Ensure your target directory has Python files
-- Check that the path is correct
-- Try running with `--verbose` flag for more details
-
-## 📝 Development Status
-
-### ✅ Completed
-- CLI entry point with argument parsing
-- Context bank (JSON storage)
-- Test runner with pytest integration
-- Test generator with watsonx.ai
-- Orchestration loop (using mocks for Sprint 1)
-- watsonx.ai client wrapper
-- Sample repository with intentional bugs
-
-### 🚧 In Progress
-- Integration of real runner.py into loop.py
-- Integration of real generator.py into loop.py
-
-### 📋 TODO
-- Fix suggester module (fixer.py)
-- Multi-iteration loop with fix application
-- Coverage tracking
-- Interactive fix approval
-
-## 🤝 Contributing
-
-This project was built with IBM watsonx.ai and follows the agentic testing pattern.
-
-## 📄 License
-
-MIT
 
 ---
 
-**Made with Bob** 🤖
+## Architecture
+
+```
+agent/
+  cli.py             # Entry point — parses args, calls loop
+  loop.py            # Recursive orchestration loop
+  generator.py       # Generates pytest functions via watsonx.ai
+  runner.py          # Runs pytest, parses results
+  fixer.py           # Suggests fixes via watsonx.ai (one call per file)
+  context_bank.py    # Reads/writes .agent-context.json
+  watsonx_client.py  # IBM watsonx.ai API wrapper with IAM auth
+.agent-context.json  # Persistent memory across runs
+sample-repo/         # Example buggy codebase for demo
+```
+
+**The memory loop:**
+
+```
+Run 1: 0 bug fixes known → generates basic tests → finds bugs → fixes applied
+Run 2: 2 bug fixes known → generates smarter tests → finds fewer bugs
+Run 3: all tests pass → exits
+```
+
+---
+
+## Built With IBM Bob
+
+Loopr was designed and built using **IBM Bob** as the AI development partner throughout the entire process. Bob's full repository context awareness was used to architect, implement, and refine every module.
+
+All Bob task session reports are in the `/bob_sessions` folder.
+
+**Powered at runtime by IBM watsonx.ai** — the Granite model (`ibm/granite-3-8b-instruct`) handles test generation, failure analysis, and fix suggestion at every iteration.
+
+---
+
+## Example: Running Against the Sample Repo
+
+```bash
+# Reset the sample repo to its buggy state
+cd loopr
+
+# Run Loopr
+loopr ./sample-repo
+
+# Watch it find and fix bugs in calculator.py and string_utils.py
+# across multiple iterations, getting smarter each time
+```
+
+---
+
+## License
+
+MIT
