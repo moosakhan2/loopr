@@ -133,8 +133,19 @@ def _build_prompt(failures: list[dict], file_code: str, file_name: str, context:
         "3. Include all functions and classes from the original, with fixes applied",
         "4. If past fixes were attempted, try a different approach",
         "",
-        f"Return ONLY the complete corrected Python code for {file_name}.",
-        "No explanations. No markdown. No file headers. Just raw Python code starting with the first line of the file."
+        f"# CRITICAL OUTPUT RULES FOR {file_name}:",
+        "1. Return ONLY raw Python code. No markdown. No backticks. No code fences.",
+        "2. Do NOT add any functions that did not exist in the original file.",
+        "3. Do NOT remove any functions that existed in the original file.",
+        "4. Keep EXACTLY the same functions as the original, just fix the bugs.",
+        "5. Start your response with the first line of Python code — no preamble.",
+        "6. End your response with the last line of Python code — no explanation after.",
+        "7. Do NOT wrap the code in triple quotes or backticks.",
+        "",
+        f"The original file had these functions: {', '.join(re.findall(r'def (\\w+)', file_code))}",
+        f"Your response must contain EXACTLY these same functions and nothing else.",
+        "",
+        f"Return the complete corrected {file_name} now:"
     ])
     
     return "\n".join(prompt_parts)

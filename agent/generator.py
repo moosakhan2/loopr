@@ -69,33 +69,31 @@ def _build_prompt(code: str, context: dict) -> str:
     
     # Add requirements
     prompt_parts.extend([
-        "# REQUIREMENTS:",
-        "1. Generate 3-5 distinct pytest test functions",
-        "2. Include both happy path tests and edge case tests",
-        "3. Each test should be complete and runnable",
-        "4. Use descriptive test names that explain what is being tested",
-        "5. Include assertions that verify expected behavior",
-        "6. If the code has obvious bugs, write tests that would catch them",
-        "7. Consider boundary conditions, null/None values, and error cases",
-        "",
-        "# OUTPUT FORMAT RULES - FOLLOW EXACTLY:",
-        "1. Output ONLY Python code. Zero explanation. Zero commentary.",
-        "2. Every function MUST start with 'def test_' on its own line.",
-        "3. Every function name MUST be unique — no duplicate function names.",
-        "4. Do NOT repeat any function you have already written.",
-        "5. Do NOT include any text outside of function definitions.",
-        "6. Do NOT include markdown, comments, or instructions of any kind.",
-        "",
-        "def test_basic_functionality():",
-        "    result = my_function(5)",
-        "    assert result == 10",
-        "",
-        "def test_edge_case_zero():",
-        "    result = my_function(0)",
-        "    assert result == 0",
-        "",
-        "Now write exactly 4 unique test functions and nothing else:"
-    ])
+    "# CRITICAL OUTPUT RULES — VIOLATIONS WILL BREAK THE TEST SUITE:",
+    "1. Output ONLY raw Python function definitions. Nothing else.",
+    "2. NEVER use 'self' as a parameter — these are NOT class methods.",
+    "3. NEVER use 'import unittest' or 'class Test'.",
+    "4. NEVER indent a def inside another def.",
+    "5. NEVER add prose, numbered lists, or commentary outside functions.",
+    "6. Every function starts at column 0 with 'def test_'.",
+    "7. Every function body is indented exactly 4 spaces.",
+    "8. Every function name is unique.",
+    "9. Use only plain 'assert' statements — no self.assertEqual.",
+    "10. Write maximum 4 functions.",
+    "",
+    "CORRECT EXAMPLE:",
+    "def test_add_positive():",
+    "    assert add(2, 3) == 5",
+    "",
+    "def test_subtract_returns_difference():",
+    "    assert subtract(5, 3) == 2",
+    "",
+    "WRONG EXAMPLE (NEVER DO THIS):",
+    "def test_add(self):",
+    "    self.assertEqual(add(2,3), 5)",
+    "",
+    "Now write exactly 4 pytest functions following the CORRECT EXAMPLE format:"
+])
     
     return "\n".join(prompt_parts)
 
