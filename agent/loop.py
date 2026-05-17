@@ -6,6 +6,7 @@ Integrates real implementations with error handling.
 """
 
 import os
+import difflib
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -41,6 +42,59 @@ def _read_target_code(target_path: str) -> str:
     target_file = py_files[0]
     with open(target_file, 'r', encoding='utf-8') as f:
         return f.read()
+
+
+def _apply_fix(target_path: str, fix_suggestion: dict, original_code: str) -> bool:
+    """Show a colored diff and ask user approval before applying the fix."""
+    try:
+        target_dir = Path(target_path)
+        file_name = fix_suggestion.get("file", "")
+        patch = fix_suggestion.get("patch", "")
+        
+        if not file_name or not patch:
+            return False
+        
+        # Show colored diff
+        original_lines = original_code.splitlines(keepends=True)
+        patched_lines = patch.splitlines(keepends=True)
+        diff = list(difflib.unified_diff(
+            original_lines, patched_lines,
+            fromfile=f"original/{file_name}",
+            tofile=f"fixed/{file_name}"
+        ))
+        
+        if diff:
+            print("\n📋 Proposed changes:")
+            print("-" * 70)
+            for line in diff:
+                if line.startswith('+') and not line.startswith('+++'):
+                    print(f"\033[92m{line}\033[0m", end='')  # green
+                elif line.startswith('-') and not line.startswith('---'):
+                    print(f"\033[91m{line}\033[0m", end='')  # red
+                else:
+                    print(line, end='')
+            print("\n" + "-" * 70)
+        
+        # Ask for approval
+        answer = input("\n❓ Apply this fix? (y/n/skip): ").strip().lower()
+        if answer == 'y':
+            target_file = target_dir / file_name
+            if not target_file.exists():
+                matches = list(target_dir.glob(f"**/{file_name}"))
+                if not matches:
+                    print(f"   ⚠️  File {file_name} not found")
+                    return False
+                target_file = matches[0]
+            with open(target_file, 'w', encoding='utf-8') as f:
+                f.write(patch)
+            print(f"   ✅ Fix applied to {target_file}")
+            return True
+        else:
+            print("   ⏭️  Fix skipped.")
+            return False
+    except Exception as e:
+        print(f"   ⚠️  Could not apply fix: {e}")
+        return False
 
 
 def run(path: str) -> Dict[str, Any]:
@@ -148,6 +202,10 @@ def run(path: str) -> Dict[str, Any]:
                 file=fix_suggestion['file'],
                 iteration=len(context['bug_fix_history']) + 1
             )
+            
+            # Show diff and ask for approval
+            print("\n🔨 Reviewing fix...")
+            _apply_fix(path, fix_suggestion, code)
             
         except Exception as e:
             print(f"   ⚠️  Warning: Could not generate fix suggestion: {e}")
