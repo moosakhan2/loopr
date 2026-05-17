@@ -9,11 +9,11 @@ import re
 from . import watsonx_client
 
 
-def suggest_fix(failures: list[dict], code: str, context: dict) -> dict:
+def suggest_fix(failures: list[dict], code: str, context: dict) -> list[dict]:
     """
     Given a list of failing test results, the source code, and context,
-    return a suggested fix:
-      {"file": str, "patch": str, "explanation": str}
+    return a list of suggested fixes, one per file:
+      [{"file": str, "patch": str, "explanation": str}, ...]
     """
     
     # Build the prompt for watsonx.ai
@@ -23,9 +23,9 @@ def suggest_fix(failures: list[dict], code: str, context: dict) -> dict:
     response = watsonx_client.complete(prompt)
     
     # Parse the response into the required format
-    fix = _parse_fix(response, context)
+    fixes = _parse_fix(response, context)
     
-    return fix
+    return fixes
 
 
 def _build_prompt(failures: list[dict], code: str, context: dict) -> str:
@@ -82,105 +82,126 @@ def _build_prompt(failures: list[dict], code: str, context: dict) -> str:
     # Add requirements
     prompt_parts.extend([
         "# REQUIREMENTS:",
-        "1. Analyze the failing tests and identify the root cause",
-        "2. Provide the COMPLETE corrected code (not a diff or patch format)",
-        "3. The corrected code should be ready to replace the original code entirely",
+        "1. Analyze the failing tests and identify which file(s) need fixing",
+        "2. For EACH file that needs changes, provide the COMPLETE corrected code",
+        "3. The corrected code should be ready to replace the original file entirely",
         "4. Include all functions and classes from the original, with fixes applied",
         "5. Explain clearly what was wrong and how you fixed it",
         "6. If past fixes were attempted, try a different approach",
         "",
         "# OUTPUT FORMAT:",
-        "Provide your response in this exact format:",
+        "Provide your response in this EXACT format for each file that needs fixing:",
         "",
+        "FILE: calculator.py",
         "EXPLANATION:",
-        "[Your explanation of what was wrong and how you fixed it]",
-        "",
+        "[Your explanation of what was wrong in this file and how you fixed it]",
         "CORRECTED_CODE:",
         "```python",
-        "[The complete corrected code here]",
+        "[The complete corrected code for calculator.py here]",
         "```",
+        "END_FILE",
         "",
-        "Now provide the fix:"
+        "FILE: string_utils.py",
+        "EXPLANATION:",
+        "[Your explanation of what was wrong in this file and how you fixed it]",
+        "CORRECTED_CODE:",
+        "```python",
+        "[The complete corrected code for string_utils.py here]",
+        "```",
+        "END_FILE",
+        "",
+        "Now provide the fixes:"
     ])
     
     return "\n".join(prompt_parts)
 
 
-def _parse_fix(response: str, context: dict) -> dict:
+def _parse_fix(response: str, context: dict) -> list[dict]:
     """
-    Parse the watsonx.ai response to extract the fix information.
-    Returns a dict with {"file": str, "patch": str, "explanation": str}
+    Parse the watsonx.ai response to extract fix information for multiple files.
+    Returns a list of dicts: [{"file": str, "patch": str, "explanation": str}, ...]
     """
     
-    # Extract explanation
-    explanation_match = re.search(
-        r'EXPLANATION:\s*\n(.*?)(?=CORRECTED_CODE:|```python|$)',
-        response,
-        re.DOTALL | re.IGNORECASE
-    )
+    fixes = []
     
-    if explanation_match:
-        explanation = explanation_match.group(1).strip()
+    # Split response by FILE blocks
+    # Pattern: FILE: filename ... EXPLANATION: ... CORRECTED_CODE: ... END_FILE
+    file_pattern = r'FILE:\s*(\S+)\s*\n.*?EXPLANATION:\s*\n(.*?)CORRECTED_CODE:\s*\n```python\s*\n(.*?)\n```.*?END_FILE'
+    matches = re.findall(file_pattern, response, re.DOTALL | re.IGNORECASE)
+    
+    if matches:
+        # Successfully parsed structured format
+        for file_name, explanation, code in matches:
+            fixes.append({
+                "file": file_name.strip(),
+                "patch": code.strip(),
+                "explanation": explanation.strip()
+            })
     else:
-        # Fallback: try to find any explanation before code
-        lines = response.split('\n')
-        explanation_lines = []
-        for line in lines:
-            if 'CORRECTED_CODE' in line or '```python' in line:
-                break
-            if line.strip():
-                explanation_lines.append(line.strip())
-        explanation = ' '.join(explanation_lines[:5]) if explanation_lines else "Fix applied based on test failures"
-    
-    # Extract corrected code
-    # Try to find code in markdown blocks first
-    code_match = re.search(r'```python\s*\n(.*?)\n```', response, re.DOTALL)
-    
-    if code_match:
-        corrected_code = code_match.group(1).strip()
-    else:
-        # Fallback: look for code after CORRECTED_CODE marker
-        code_match = re.search(
-            r'CORRECTED_CODE:\s*\n(.*?)(?=\n\n|$)',
+        # Fallback: try to parse single-file format (backward compatibility)
+        # Extract file name
+        file_match = re.search(r'FILE:\s*(\S+)', response, re.IGNORECASE)
+        file_name = file_match.group(1).strip() if file_match else "unknown.py"
+        
+        # Extract explanation
+        explanation_match = re.search(
+            r'EXPLANATION:\s*\n(.*?)(?=CORRECTED_CODE:|```python|FILE:|$)',
             response,
             re.DOTALL | re.IGNORECASE
         )
+        explanation = explanation_match.group(1).strip() if explanation_match else "Fix applied based on test failures"
+        
+        # Extract corrected code
+        code_match = re.search(r'```python\s*\n(.*?)\n```', response, re.DOTALL)
+        
         if code_match:
             corrected_code = code_match.group(1).strip()
         else:
-            # Last resort: try to extract any Python-looking code
-            # Look for function definitions
-            func_pattern = r'(def \w+.*?)(?=\ndef |\Z)'
-            functions = re.findall(func_pattern, response, re.DOTALL)
-            if functions:
-                corrected_code = '\n\n'.join(functions).strip()
+            # Try without markdown
+            code_match = re.search(
+                r'CORRECTED_CODE:\s*\n(.*?)(?=END_FILE|FILE:|$)',
+                response,
+                re.DOTALL | re.IGNORECASE
+            )
+            if code_match:
+                corrected_code = code_match.group(1).strip()
             else:
-                raise RuntimeError(
-                    f"Failed to extract corrected code from watsonx.ai response. "
-                    f"Response was: {response[:300]}..."
-                )
+                # Last resort: extract function definitions
+                func_pattern = r'(def \w+.*?)(?=\ndef |\Z)'
+                functions = re.findall(func_pattern, response, re.DOTALL)
+                if functions:
+                    corrected_code = '\n\n'.join(functions).strip()
+                else:
+                    raise RuntimeError(
+                        f"Failed to extract corrected code from watsonx.ai response. "
+                        f"Response was: {response[:300]}..."
+                    )
+        
+        # Try to infer filename from code if not found
+        if file_name == "unknown.py":
+            if "calculator" in corrected_code.lower():
+                file_name = "calculator.py"
+            elif "utils" in corrected_code.lower():
+                file_name = "utils.py"
+            else:
+                # Check bug history
+                bug_history = context.get("bug_fix_history", [])
+                if bug_history:
+                    file_name = bug_history[-1].get("file", "unknown.py")
+        
+        fixes.append({
+            "file": file_name,
+            "patch": corrected_code,
+            "explanation": explanation
+        })
     
-    # Determine the file name
-    # Try to get it from context or use a default
-    file_name = "unknown.py"
+    if not fixes:
+        raise RuntimeError(
+            f"Failed to parse any fixes from watsonx.ai response. "
+            f"Response was: {response[:300]}..."
+        )
     
-    # Check if there's a file mentioned in bug history
-    bug_history = context.get("bug_fix_history", [])
-    if bug_history:
-        # Use the most recent file from history
-        file_name = bug_history[-1].get("file", "unknown.py")
-    
-    # If we can infer from the code structure, use that
-    if "calculator" in corrected_code.lower():
-        file_name = "calculator.py"
-    elif "utils" in corrected_code.lower():
-        file_name = "utils.py"
-    
-    return {
-        "file": file_name,
-        "patch": corrected_code,
-        "explanation": explanation
-    }
+    return fixes
 
 
 if __name__ == "__main__":
@@ -249,16 +270,21 @@ def divide_numbers(a, b):
     print()
     
     try:
-        print("Generating fix suggestion...")
-        fix = suggest_fix(sample_failures, sample_code, sample_context)
+        print("Generating fix suggestions...")
+        fixes = suggest_fix(sample_failures, sample_code, sample_context)
         
-        print("\n✓ Fix suggestion generated successfully!\n")
+        print(f"\n✓ Generated {len(fixes)} fix suggestion(s)!\n")
         print("=" * 70)
-        print(f"\nFile: {fix['file']}")
-        print(f"\nExplanation:\n{fix['explanation']}")
-        print(f"\nCorrected Code:\n{fix['patch']}")
-        print("\n" + "=" * 70)
-        print("✓ fixer.py is working correctly!")
+        
+        for i, fix in enumerate(fixes, 1):
+            print(f"\n# Fix {i}:")
+            print(f"File: {fix['file']}")
+            print(f"\nExplanation:\n{fix['explanation']}")
+            print(f"\nCorrected Code:\n{fix['patch']}")
+            print("\n" + "-" * 70)
+        
+        print("=" * 70)
+        print(f"✓ fixer.py is working correctly! Generated {len(fixes)} fix(es).")
         
     except Exception as e:
         print(f"\n✗ Error: {e}")

@@ -18,33 +18,37 @@ from agent.fixer import suggest_fix
 
 def _read_target_code(target_path: str) -> str:
     """
-    Read the main Python file from the target directory.
-    For now, reads the first .py file found (excluding __init__.py and test files).
-    
-    Args:
-        target_path: Path to the target repository
-        
-    Returns:
-        Source code as a string
+    Read all Python files from the target directory.
+    Excludes __init__.py, test files, and __pycache__.
+    Returns all code concatenated with file headers.
     """
     target_dir = Path(target_path)
     
-    # Find Python files (excluding __init__.py and test files)
+    # Find all Python files recursively (excluding __init__.py, test files, pycache)
     py_files = [
-        f for f in target_dir.glob("*.py")
-        if f.name != "__init__.py" and not f.name.startswith("test_")
+        f for f in sorted(target_dir.rglob("*.py"))
+        if f.name != "__init__.py"
+        and not f.name.startswith("test_")
+        and "__pycache__" not in str(f)
+        and "venv" not in str(f)
     ]
     
     if not py_files:
         raise RuntimeError(f"No Python files found in {target_path}")
     
-    # Read the first file found
-    target_file = py_files[0]
-    with open(target_file, 'r', encoding='utf-8') as f:
-        return f.read()
+    # Read all files and concatenate with headers
+    all_code = []
+    for f in py_files:
+        with open(f, 'r', encoding='utf-8') as fp:
+            content = fp.read().strip()
+        if content:
+            all_code.append(f"# ===== FILE: {f.name} =====\n{content}")
+    
+    print(f"   Found {len(py_files)} Python file(s): {[f.name for f in py_files]}")
+    return "\n\n".join(all_code)
 
 
-def _apply_fix(target_path: str, fix_suggestion: dict, original_code: str) -> bool:
+def _apply_fix(target_path: str, fix_suggestion: dict, original_code: str | None = None) -> bool:
     """Show a colored diff and ask user approval before applying the fix."""
     try:
         target_dir = Path(target_path)
@@ -54,8 +58,21 @@ def _apply_fix(target_path: str, fix_suggestion: dict, original_code: str) -> bo
         if not file_name or not patch:
             return False
         
+        # Find the target file
+        target_file = target_dir / file_name
+        if not target_file.exists():
+            matches = list(target_dir.glob(f"**/{file_name}"))
+            if not matches:
+                print(f"   ⚠️  File {file_name} not found")
+                return False
+            target_file = matches[0]
+        
+        # Read the current content of the specific file
+        with open(target_file, 'r', encoding='utf-8') as f:
+            file_original_code = f.read()
+        
         # Show colored diff
-        original_lines = original_code.splitlines(keepends=True)
+        original_lines = file_original_code.splitlines(keepends=True)
         patched_lines = patch.splitlines(keepends=True)
         diff = list(difflib.unified_diff(
             original_lines, patched_lines,
@@ -78,13 +95,6 @@ def _apply_fix(target_path: str, fix_suggestion: dict, original_code: str) -> bo
         # Ask for approval
         answer = input("\n❓ Apply this fix? (y/n/skip): ").strip().lower()
         if answer == 'y':
-            target_file = target_dir / file_name
-            if not target_file.exists():
-                matches = list(target_dir.glob(f"**/{file_name}"))
-                if not matches:
-                    print(f"   ⚠️  File {file_name} not found")
-                    return False
-                target_file = matches[0]
             with open(target_file, 'w', encoding='utf-8') as f:
                 f.write(patch)
             print(f"   ✅ Fix applied to {target_file}")
@@ -198,44 +208,48 @@ def run(path: str) -> Dict[str, Any]:
             }
         
         # Step 3: If there are failures, suggest fixes
-        fix_suggestion = None
+        fix_suggestions = []
         if failed:
             print("\n🔧 Analyzing failures and suggesting fixes...")
             try:
-                fix_suggestion = suggest_fix(failed, code, context)
+                fix_suggestions = suggest_fix(failed, code, context)
                 
-                # Display the fix suggestion
-                print("\n" + "=" * 70)
-                print("🔍 FIX SUGGESTION")
-                print("=" * 70)
-                print(f"📁 File: {fix_suggestion['file']}")
-                print(f"💡 Explanation: {fix_suggestion['explanation']}")
-                print(f"\n📝 Patch:")
-                print(fix_suggestion['patch'])
-                print("=" * 70)
+                print(f"\n✓ Generated {len(fix_suggestions)} fix suggestion(s)")
                 
-                # Save fix to context bank
-                append_history(
-                    bug=fix_suggestion['explanation'],
-                    fix=fix_suggestion['patch'],
-                    file=fix_suggestion['file'],
-                    iteration=len(context['bug_fix_history']) + 1
-                )
-                
-                # Show diff and ask for approval
-                print("\n🔨 Reviewing fix...")
-                _apply_fix(path, fix_suggestion, code)
-                
-                all_fix_suggestions.append(fix_suggestion)
+                # Process each file fix
+                for i, fix_suggestion in enumerate(fix_suggestions, 1):
+                    # Display the fix suggestion
+                    print("\n" + "=" * 70)
+                    print(f"🔍 FIX SUGGESTION {i}/{len(fix_suggestions)}")
+                    print("=" * 70)
+                    print(f"📁 File: {fix_suggestion['file']}")
+                    print(f"💡 Explanation: {fix_suggestion['explanation']}")
+                    print(f"\n📝 Patch:")
+                    print(fix_suggestion['patch'])
+                    print("=" * 70)
+                    
+                    # Save fix to context bank
+                    append_history(
+                        bug=fix_suggestion['explanation'],
+                        fix=fix_suggestion['patch'],
+                        file=fix_suggestion['file'],
+                        iteration=len(context['bug_fix_history']) + 1
+                    )
+                    
+                    # Show diff and ask for approval
+                    print(f"\n🔨 Reviewing fix for {fix_suggestion['file']}...")
+                    _apply_fix(path, fix_suggestion, code)
+                    
+                    all_fix_suggestions.append(fix_suggestion)
                 
             except Exception as e:
-                print(f"   ⚠️  Warning: Could not generate fix suggestion: {e}")
+                print(f"   ⚠️  Warning: Could not generate fix suggestions: {e}")
                 print(f"   This usually means watsonx.ai returned unexpected output.")
-                fix_suggestion = {
+                fix_suggestions = [{
                     "file": "unknown",
                     "patch": "",
                     "explanation": f"Error: {str(e)}"
-                }
+                }]
         else:
             print("\n✅ All tests passed!")
         
